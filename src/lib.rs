@@ -40,8 +40,10 @@ impl Semaphore {
     }
 
     pub fn exit(&self) {
-        let &(ref mutex_count, _) = &*self.usage;
+        let &(ref mutex_count, ref condvar) = &*self.usage;
         let mut count = mutex_count.lock().unwrap();
         *count += 1;
+        condvar.notify_one();
+
     }
 }

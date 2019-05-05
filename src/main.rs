@@ -4,66 +4,24 @@ use std::net::TcpListener;
 use std::fs;
 use std::thread;
 use std::time::Duration;
-use std::sync::Arc;
-use std::sync::Mutex;
-use std::sync::Condvar;
+
+use web_server::Semaphore;
 
 fn main() {
-    let listener = TcpListener::bind("127.0.0.1:7878").unwrap();
-    let max_threads = 2;
-    
-    let thing = Arc::new((Mutex::new(max_threads), Condvar::new()));
-    let mut count = 0;
+    let listener = TcpListener::bind("127.0.0.1:7878").unwrap();    
+    let max_number_of_threads = 2;
+    let semaphore = Semaphore::new(max_number_of_threads);
 
     for stream in listener.incoming() {
-        count += 1;
-
-        println!("\r\n{} - starting loop", count);
-        {
-            let &(ref num_threads_mutex, ref cond) = &*thing;
-            let mut num_threads = num_threads_mutex.lock().unwrap();
-            let mut can_go = *num_threads > 0;
-            println!("{} - num_threads_1: {}", count, num_threads);
-            println!("{} - can_go_1: {}", count, can_go);
-            if can_go {
-                *num_threads -= 1;                    
-            }
-
-            while !can_go {
-                println!("{} - Waiting", count);
-                num_threads = cond.wait(num_threads).unwrap();
-                println!("{} - Awake", count);
-
-                can_go = *num_threads > 0;
-                println!("{} - num_threads_2: {}", count, num_threads);
-                println!("{} - can_go_2: {}", count, can_go);
-                if can_go {
-                    *num_threads -= 1;                    
-                }
-            }
-        }
-
-        let stream = stream.unwrap();        
-        let thing2 = thing.clone();        
-
-        let inner_count = count;
-        thread::spawn(move || {
-            
-            println!("{} Handling collection", inner_count);
+        semaphore.enter();      
+        let thread_semaphore = semaphore.clone();
+        let stream = stream.unwrap();
+        thread::spawn(move || {            
             handle_connection(stream);
-            println!("{} Done!", inner_count);
 
-            let &(ref num_threads_mutex, ref cond) = &*thing2;
-
-            let mut num_threads = num_threads_mutex.lock().unwrap();
-            *num_threads += 1;
-            cond.notify_one();
-
-        });
-        
-
+            thread_semaphore.exit();
+        });        
     }
-    println!("Hello, world!");
 }
 
 fn handle_connection(mut stream: TcpStream) {
@@ -76,7 +34,7 @@ fn handle_connection(mut stream: TcpStream) {
     let (file_path, status, status_message) = if buffer.starts_with(get) {
         ("hello.html", 200, "OK")
     } else if buffer.starts_with(sleep) { 
-        thread::sleep(Duration::from_secs(30));
+        thread::sleep(Duration::from_secs(5));
         ("hello.html", 200, "OK")
     } else {
         ("404.html", 404, "NOT FOUND")
